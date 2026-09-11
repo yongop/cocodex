@@ -65,6 +65,7 @@ make demo
 | 초기화권 목록과 만료 표시 | `Sources/Cocount/Views/ResetCreditsView.swift` |
 | 기간 기록·날짜 계산 | `Sources/CocountCore/UsagePeriod.swift` |
 | 토큰 요약과 그래프 | `Sources/Cocount/Views/TokenCard.swift` |
+| 토큰·한도 카드 공통 헤더와 일별 막대 | `Sources/Cocount/Views/UsageCardComponents.swift` |
 | 한도 사용률 요약과 그래프 | `Sources/Cocount/Views/LimitUsageCard.swift` |
 | 한도 잔여율 기록·일별·시간별 집계 | `Sources/CocountCore/LimitUsageHistory.swift` |
 | 설정 항목 | `Sources/Cocount/Views/SettingsView.swift` |

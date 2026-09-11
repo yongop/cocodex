@@ -76,12 +76,7 @@ final class UsageStore: ObservableObject {
         refreshMinutes = [1, 5, 15].contains(saved) ? saved : 5
         appearance = defaults.string(forKey: "appearance") ?? "system"
         themePreset = defaults.string(forKey: "themePreset").flatMap(ThemePreset.init(rawValue:)) ?? .sage
-        if demo {
-            snapshot = .demo()
-            updateDemoEstimate()
-            updateHistory()
-            updateLimitHistory()
-        }
+        if demo { refreshDemo() }
     }
 
     var colorScheme: ColorScheme? {
@@ -103,17 +98,16 @@ final class UsageStore: ObservableObject {
     }
 
     func refreshIfNeeded() {
-        if snapshot == nil || now().timeIntervalSince(snapshot!.fetchedAt) >= 60 { refresh() }
+        guard let snapshot, now().timeIntervalSince(snapshot.fetchedAt) < 60 else {
+            refresh()
+            return
+        }
     }
 
     func refresh() {
         guard !isLoading else { return }
         if isDemo {
-            snapshot = .demo()
-            updateDemoEstimate()
-            updateHistory()
-            updateLimitHistory()
-            errorMessage = nil
+            refreshDemo()
             return
         }
         isLoading = true
@@ -186,8 +180,9 @@ final class UsageStore: ObservableObject {
         estimateTask?.cancel()
     }
 
-    private func updateDemoEstimate() {
-        guard let snapshot else { return }
+    private func refreshDemo() {
+        let snapshot = UsageSnapshot.demo()
+        self.snapshot = snapshot
         let total = snapshot.tokens?.tokens(on: snapshot.fetchedAt) ?? 0
         let current = TodayTokenEstimate.tenMinuteIndex(at: snapshot.fetchedAt)
         var weights = Array(repeating: Int64(0), count: 144)
@@ -199,6 +194,10 @@ final class UsageStore: ObservableObject {
         tenMinuteBins[current] += total - tenMinuteBins.reduce(0, +)
         todayEstimate = TodayTokenEstimate(tokens: total, date: snapshot.fetchedAt,
                                             tenMinuteTokens: tenMinuteBins)
+        history = snapshot.limits.featuredWindow.flatMap(UsagePeriod.init(window:))
+            .map { PeriodHistory.demo(current: $0) } ?? PeriodHistory()
+        limitHistory = .demo(now: snapshot.fetchedAt)
+        errorMessage = nil
     }
 
     private func refreshEstimate() {
@@ -208,16 +207,10 @@ final class UsageStore: ObservableObject {
         let requestedAt = now()
         estimateTask = Task(priority: .utility) { [weak self, estimator, estimateCacheResetTask] in
             await estimateCacheResetTask?.value
-            do {
-                let result = try await estimator.estimate(now: requestedAt)
-                guard let self, self.generation == requestGeneration, !Task.isCancelled else { return }
-                self.todayEstimate = result
-                self.estimateTask = nil
-            } catch {
-                guard let self, self.generation == requestGeneration, !Task.isCancelled else { return }
-                self.todayEstimate = nil
-                self.estimateTask = nil
-            }
+            let result = try? await estimator.estimate(now: requestedAt)
+            guard let self, self.generation == requestGeneration, !Task.isCancelled else { return }
+            self.todayEstimate = result
+            self.estimateTask = nil
         }
     }
 
@@ -233,17 +226,6 @@ final class UsageStore: ObservableObject {
         return age < 0 || age >= Double(refreshMinutes * 60)
             || !Calendar.current.isDate(lastTokenRequestAt, inSameDayAs: current)
             || tokenRequestTimeZone != .current
-    }
-
-    private func updateLimitHistory() {
-        guard let snapshot, isDemo else { return }
-        limitHistory = .demo(now: snapshot.fetchedAt)
-    }
-
-    private func updateHistory() {
-        guard let snapshot, isDemo, let window = snapshot.limits.featuredWindow,
-              let period = UsagePeriod(window: window) else { history = PeriodHistory(); return }
-        history = .demo(current: period)
     }
 
     func shutdown() async {

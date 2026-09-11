@@ -1,4 +1,4 @@
-.PHONY: build app run demo test preview benchmark disk-usage clean-cache
+.PHONY: build app run demo test preview benchmark benchmark-history disk-usage clean-cache
 
 build:
 	swift build
@@ -30,6 +30,5 @@ disk-usage:
 clean-cache:
 	@if [ -d .build ]; then find .build -type d \( -name ModuleCache -o -name index \) -prune -exec rm -r {} +; fi
 
-.PHONY: benchmark-history
 benchmark-history:
 	bash scripts/benchmark-history.sh

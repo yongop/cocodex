@@ -86,11 +86,13 @@ public struct UsageSnapshot: Sendable {
     }
 
     public static func demo(now: Date = .now) -> UsageSnapshot {
-        let limitsJSON = """
-        {"limitId":"codex","planType":"pro",
-         "primary":{"usedPercent":18,"windowDurationMins":300,"resetsAt":\(now.addingTimeInterval(7_920).timeIntervalSince1970)},
-         "secondary":{"usedPercent":70,"windowDurationMins":10080,"resetsAt":\(now.addingTimeInterval(342_000).timeIntervalSince1970)}}
-        """
+        let limits = RateLimitBucket(
+            limitId: "codex", limitName: nil, planType: "pro",
+            primary: UsageWindow(usedPercent: 18, windowDurationMins: 300,
+                                 resetsAt: now.addingTimeInterval(7_920).timeIntervalSince1970),
+            secondary: UsageWindow(usedPercent: 70, windowDurationMins: 10_080,
+                                   resetsAt: now.addingTimeInterval(342_000).timeIntervalSince1970)
+        )
         let formatter = DateFormatter()
         formatter.calendar = Calendar(identifier: .gregorian)
         formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -98,15 +100,10 @@ public struct UsageSnapshot: Sendable {
         let values: [Int64] = [12_400_000, 18_900_000, 10_500_000, 24_800_000, 15_600_000, 39_130_000, 12_860_000]
         let days = values.enumerated().map { index, value in
             let date = Calendar.current.date(byAdding: .day, value: index - 6, to: now)!
-            return "{\"startDate\":\"\(formatter.string(from: date))\",\"tokens\":\(value)}"
-        }.joined(separator: ",")
-        // These literals are owned by the app; production responses always use throwing decoding.
-        return UsageSnapshot(
-            limits: try! JSONDecoder().decode(RateLimitBucket.self, from: Data(limitsJSON.utf8)),
-            tokens: try! JSONDecoder().decode(TokenUsage.self, from: Data("{\"dailyUsageBuckets\":[\(days)]}".utf8)),
-            fetchedAt: now,
-            resetCredits: .demo(now: now)
-        )
+            return TokenUsage.Day(startDate: formatter.string(from: date), tokens: value)
+        }
+        return UsageSnapshot(limits: limits, tokens: TokenUsage(dailyUsageBuckets: days),
+                             fetchedAt: now, resetCredits: .demo(now: now))
     }
 }
 

@@ -68,13 +68,7 @@ public struct LimitUsageDay: Codable, Sendable, Equatable {
         start = interval.start
         end = interval.end
         timeZoneID = calendar.timeZone.identifier
-        var intervals: [DateInterval] = []
-        var cursor = start
-        while cursor < end {
-            let next = min(cursor.addingTimeInterval(900), end)
-            intervals.append(DateInterval(start: cursor, end: next))
-            cursor = next
-        }
+        let intervals = LimitUsageHistory.quarterIntervals(in: interval)
         let minutes = Set(history.observations.flatMap { $0.windows.map(\.minutes) })
         windows = minutes.sorted().compactMap { minutes in
             let bins = history.bins(intervals, minutes: minutes)

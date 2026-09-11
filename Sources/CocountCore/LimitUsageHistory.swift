@@ -140,14 +140,18 @@ public struct LimitUsageHistory: Codable, Sendable {
 
     public func quarterHourly(on date: Date, minutes: Int, calendar: Calendar = .current) -> [Bin] {
         guard let day = calendar.dateInterval(of: .day, for: date) else { return [] }
+        return bins(Self.quarterIntervals(in: day), minutes: minutes)
+    }
+
+    static func quarterIntervals(in interval: DateInterval) -> [DateInterval] {
         var intervals: [DateInterval] = []
-        var start = day.start
-        while start < day.end {
-            let end = min(start.addingTimeInterval(900), day.end)
+        var start = interval.start
+        while start < interval.end {
+            let end = min(start.addingTimeInterval(900), interval.end)
             intervals.append(DateInterval(start: start, end: end))
             start = end
         }
-        return bins(intervals, minutes: minutes)
+        return intervals
     }
 
     func bins(_ intervals: [DateInterval], minutes: Int) -> [Bin] {

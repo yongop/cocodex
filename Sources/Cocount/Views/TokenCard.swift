@@ -23,8 +23,6 @@ struct TokenCard: View {
             : usage?.tokens(on: day)
     }
 
-    private var maximum: Double { max(1, Double(days.compactMap { chartTokens(on: $0) }.max() ?? 0)) }
-
     private func chartLabel(_ value: Int64?) -> String {
         guard let value else { return "—" }
         return String(format: "%.1f억", Double(value) / 100_000_000)
@@ -43,13 +41,12 @@ struct TokenCard: View {
                     HStack(alignment: .top, spacing: 8) {
                         todayMetric
                         Rectangle().fill(theme.border).frame(width: 1, height: 32)
-                        metric("어제", value: yesterdayTokens, prominent: false)
+                        yesterdayMetric
                     }
                     .frame(width: Theme.metricWidth)
                     activityChart
                 }
                 DailyTokenChart(estimate: todayEstimate)
-
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: Theme.radius))
@@ -77,35 +74,16 @@ struct TokenCard: View {
     }
 
     private var activityChart: some View {
-        HStack(alignment: .bottom, spacing: 4) {
-            ForEach(days, id: \.self) { day in
-                let value = chartTokens(on: day)
+        let values = days.map { (day: $0, tokens: chartTokens(on: $0)) }
+        let maximum = max(1, Double(values.compactMap(\.tokens).max() ?? 0))
+        return HStack(alignment: .bottom, spacing: 4) {
+            ForEach(values, id: \.day) { item in
+                let day = item.day
+                let value = item.tokens
                 let today = Calendar.current.isDate(day, inSameDayAs: now)
-                VStack(spacing: 4) {
-                    RoundedRectangle(cornerRadius: 3)
-                        .fill(value == nil ? theme.subtle : today ? theme.companion : theme.soft)
-                        .frame(height: max(3, Double(value ?? 0) / maximum * 42))
-                        .overlay(alignment: .top) {
-                            Text(chartLabel(value))
-                                .font(.system(size: 8, weight: .medium)).monospacedDigit()
-                                .foregroundStyle(today ? theme.companion : theme.muted)
-                                .fixedSize()
-                                .offset(y: -12)
-                                .opacity(isHovered ? 1 : 0)
-                                .accessibilityHidden(true)
-                        }
-                        .frame(height: 42, alignment: .bottom)
-                        .padding(.top, 12)
-                    VStack(spacing: 2) {
-                        Text(today ? "오늘" : day.formatted(.dateTime.weekday(.abbreviated)))
-                            .font(.system(size: 9, weight: today ? .semibold : .regular))
-                        Text(dateLabel(day))
-                            .font(.system(size: 8)).monospacedDigit()
-                            .opacity(isHovered ? 1 : 0)
-                    }
-                    .foregroundStyle(today ? theme.companion : theme.muted)
-                }
-                .frame(maxWidth: .infinity)
+                UsageDayBar(day: day, dateLabel: dateLabel(day), value: value.map(Double.init),
+                            maximum: maximum, valueLabel: chartLabel(value),
+                            isToday: today, isHovered: isHovered)
                 .help("\(day.formatted(date: .abbreviated, time: .omitted)): \(value.map { $0.formatted() + " 토큰" } ?? "미집계")\(today ? " · 로컬 기록 기반 추정" : " · 서버 집계")")
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel("\(day.formatted(date: .abbreviated, time: .omitted)) \(today ? "추정 " : "")\(UsageFormatting.tokens(value)) 토큰")
@@ -113,17 +91,18 @@ struct TokenCard: View {
         }
     }
 
-    private func metric(_ title: String, value: Int64?, prominent: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
+    private var yesterdayMetric: some View {
+        let value = yesterdayTokens
+        return VStack(alignment: .leading, spacing: 3) {
             HStack(spacing: 4) {
-                Text(title).font(.system(size: 11))
+                Text("어제").font(.system(size: 11))
                 Text("토큰").font(.system(size: 9))
             }
             .foregroundStyle(theme.muted)
             Text(UsageFormatting.tokens(value))
                 .font(.system(size: 19, weight: .semibold, design: .rounded)).monospacedDigit()
                 .lineLimit(1).minimumScaleFactor(0.8)
-                .foregroundStyle(prominent ? theme.accent : theme.text)
+                .foregroundStyle(theme.text)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .help(value?.formatted() ?? "미집계")

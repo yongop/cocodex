@@ -1,35 +1,6 @@
 import CocountCore
 import SwiftUI
 
-/// Keep the original card header; its title switches the unit in place.
-struct UsageCardHeader: View {
-    @Environment(\.cocountTheme) private var theme
-    @Binding var mode: UsageCardMode
-    var basis: String?
-    var changeBasis: (() -> Void)?
-
-    var body: some View {
-        HStack {
-            Button { mode = mode == .limits ? .tokens : .limits } label: {
-                Label(mode.title, systemImage: "chart.bar.xaxis")
-                    .font(.system(size: 12, weight: .semibold)).foregroundStyle(theme.accent)
-            }
-            .buttonStyle(.plain)
-            .help("클릭하여 \(mode == .limits ? "토큰 사용" : "한도 사용")으로 전환")
-            .accessibilityLabel("\(mode.title), 클릭하여 표시 전환")
-            Spacer()
-            if let basis {
-                Button { changeBasis?() } label: {
-                    Text("\(basis) 기준").font(.system(size: 10)).foregroundStyle(theme.muted)
-                }
-                .buttonStyle(.plain)
-                .help("클릭하여 한도 기준 전환 · 선택한 한도 전체 = 100%")
-            }
-            Text("최근 7일").font(.system(size: 10)).foregroundStyle(theme.muted)
-        }
-    }
-}
-
 struct LimitUsageCard: View {
     @Environment(\.cocountTheme) private var theme
     let limits: RateLimitBucket
@@ -120,27 +91,11 @@ struct LimitUsageCard: View {
                 let today = Calendar.current.isDate(bin.start, inSameDayAs: now)
                 let selected = bin.start == day
                 Button { selectedDay = bin.start } label: {
-                    VStack(spacing: 4) {
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(bin.usedPercent == nil ? theme.subtle : today ? theme.companion : theme.soft)
-                            .frame(height: max(3, (bin.usedPercent ?? 0) / maximum * 42))
-                            .overlay(alignment: .top) {
-                                Text(LimitUsageHistory.percent(bin.usedPercent))
-                                    .font(.system(size: 8, weight: .medium)).monospacedDigit()
-                                    .foregroundStyle(today ? theme.companion : theme.muted)
-                                    .fixedSize().offset(y: -12).opacity(isHovered ? 1 : 0)
-                                    .accessibilityHidden(true)
-                            }
-                            .frame(height: 42, alignment: .bottom).padding(.top, 12)
-                        VStack(spacing: 2) {
-                            Text(today ? "오늘" : bin.start.formatted(.dateTime.weekday(.abbreviated)))
-                                .font(.system(size: 9, weight: today || selected ? .semibold : .regular))
-                            Text(bin.start.formatted(.dateTime.month(.defaultDigits).day()))
-                                .font(.system(size: 8)).monospacedDigit().opacity(isHovered ? 1 : 0)
-                        }
-                        .foregroundStyle(today ? theme.companion : theme.muted)
-                    }
-                    .frame(maxWidth: .infinity).contentShape(Rectangle())
+                    UsageDayBar(day: bin.start, dateLabel: bin.start.formatted(.dateTime.month(.defaultDigits).day()),
+                                value: bin.usedPercent, maximum: maximum,
+                                valueLabel: LimitUsageHistory.percent(bin.usedPercent),
+                                isToday: today, isSelected: selected, isHovered: isHovered)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .help("\(bin.start.formatted(date: .abbreviated, time: .omitted)): \(limitBinDetail(bin, now: now)) · 클릭하여 시간별 보기")
