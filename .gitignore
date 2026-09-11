@@ -1,0 +1,37 @@
+.build/
+.swiftpm/
+dist/
+.DS_Store
+*.xcuserstate
+xcuserdata/
+
+# Local environment and authentication data
+.env
+.env.*
+!.env.example
+!.env.*.example
+.codex/
+auth.json
+credentials.json
+secrets.json
+
+# Private keys, signing identities, and provisioning profiles
+*.pem
+*.key
+*.p12
+*.pfx
+*.mobileprovision
+*.provisionprofile
+id_rsa
+id_ed25519
+
+# Local diagnostics and usage exports
+*.log
+*.log.*
+*.jsonl
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
