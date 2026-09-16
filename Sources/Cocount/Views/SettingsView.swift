@@ -38,6 +38,33 @@ struct SettingsView: View {
                     }
                 }
                 Divider()
+                VStack(alignment: .leading, spacing: 8) {
+                    Toggle("iCloud 사용량 동기화", isOn: $store.syncEnabled)
+                    Text(store.syncStatus)
+                        .font(.system(size: 11)).foregroundStyle(theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if store.syncEnabled && !store.isDemo {
+                        ForEach(store.syncDevices) { device in
+                            HStack {
+                                Text(device.name + (device.isCurrentDevice ? " · 이 Mac" : ""))
+                                    .lineLimit(1).truncationMode(.middle)
+                                Spacer()
+                                Text(device.lastSeen, format: .dateTime.month().day().hour().minute())
+                                    .monospacedDigit()
+                            }
+                            .font(.system(size: 10)).foregroundStyle(theme.muted)
+                            .help("이 기기가 마지막으로 기록한 시각이에요. 꺼져 있으면 새 기록이 도착하지 않아요.")
+                        }
+                        if store.syncFolder != nil {
+                            Button("iCloud 동기화 폴더 열기") { store.openSyncFolder() }
+                                .buttonStyle(.borderless)
+                        }
+                        Text("두 Mac에서 같은 iCloud·Codex 계정으로 앱을 실행해 주세요. 대화 내용 없이 사용량 기록만 공유해요.")
+                            .font(.system(size: 10)).foregroundStyle(theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                Divider()
                 ThemePicker(selection: $store.themePreset)
                 Divider()
                 Toggle("샘플 데이터로 미리 보기", isOn: $store.isDemo)

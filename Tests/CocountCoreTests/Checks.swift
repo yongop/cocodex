@@ -96,6 +96,7 @@ struct Checks {
         print("PASS interrupted commit recovery and archive corruption")
         try await daily.failedRolloverRetriesWithoutLosingRawData()
         print("PASS rollover retry preserves raw data and prunes expired accounts")
-        print("\(checks.count + 6) checks passed.")
+        try await UsageSyncTests().run()
+        print("\(checks.count + 16) checks passed.")
     }
 }

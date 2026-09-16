@@ -26,6 +26,26 @@ final class UsageStore: ObservableObject {
     @Published private(set) var isLoading = false
     @Published private(set) var errorMessage: String?
     @Published private(set) var historyIssue: String?
+    @Published private(set) var syncIssue: String?
+    @Published private(set) var syncDevices: [UsageSyncDevice] = []
+    @Published private(set) var isSyncing = false
+    @Published private(set) var syncFolder: URL?
+    @Published var syncEnabled: Bool {
+        didSet {
+            guard syncEnabled != oldValue else { return }
+            defaults.set(syncEnabled, forKey: "iCloudSyncEnabled")
+            syncGeneration += 1
+            syncTask?.cancel()
+            pendingSync = nil
+            isSyncing = false
+            syncIssue = nil
+            syncDevices = []
+            limitHistory = localHistories.limits
+            history = localHistories.periods
+            todayEstimate = localEstimate
+            if syncEnabled { refresh() }
+        }
+    }
     @Published private(set) var history = PeriodHistory()
     @Published private(set) var limitHistory = LimitUsageHistory()
     @Published var usageCardMode: UsageCardMode {
@@ -65,6 +85,12 @@ final class UsageStore: ObservableObject {
     private var estimateTask: Task<Void, Never>?
     private var estimateCacheResetTask: Task<Void, Never>?
     private let estimator: LocalTokenEstimator
+    private let syncEngine: UsageSyncEngine
+    private var syncTask: Task<Void, Never>?
+    private var syncGeneration = 0
+    private var localHistories = UsageHistories()
+    private var localEstimate: TodayTokenEstimate?
+    private var pendingSync: (UsageSnapshot, UsageHistories)?
     private var generation = 0
     private(set) var isDashboardVisible = false
     // Quota-only refreshes must not extend the freshness of the token data.
@@ -75,11 +101,14 @@ final class UsageStore: ObservableObject {
          defaults: UserDefaults = .standard,
          historyPersistence: UsageHistoryPersistence = UsageHistoryPersistence(),
          estimator: LocalTokenEstimator = LocalTokenEstimator(),
+         syncEngine: UsageSyncEngine = UsageSyncEngine(),
          now: @escaping () -> Date = { .now }) {
         self.provider = provider
         self.defaults = defaults
         self.historyPersistence = historyPersistence
         self.estimator = estimator
+        self.syncEngine = syncEngine
+        syncEnabled = defaults.object(forKey: "iCloudSyncEnabled") as? Bool ?? true
         self.now = now
         isDemo = demo
         usageCardMode = defaults.string(forKey: "usageCardMode").flatMap(UsageCardMode.init(rawValue:)) ?? .limits
@@ -138,7 +167,7 @@ final class UsageStore: ObservableObject {
             // Also throttle failed attempts so switching cards cannot cause a retry loop.
             lastTokenRequestAt = now()
             tokenRequestTimeZone = .current
-            refreshEstimate()
+            if !syncEnabled { refreshEstimate() }
         }
         refreshTask = Task { [weak self, provider, historyPersistence] in
             do {
@@ -147,6 +176,15 @@ final class UsageStore: ObservableObject {
                 let histories = try await historyPersistence.record(value)
                 guard let self, self.generation == requestGeneration, !Task.isCancelled else { return }
                 let sameAccount = value.historyKey != nil && value.historyKey == self.snapshot?.historyKey
+                if !sameAccount {
+                    self.syncGeneration += 1
+                    self.syncTask?.cancel()
+                    self.pendingSync = nil
+                    self.syncDevices = []
+                    self.syncIssue = nil
+                    self.localEstimate = nil
+                    if self.syncEnabled { self.todayEstimate = nil }
+                }
                 if !includeTokens && !sameAccount {
                     self.lastTokenRequestAt = nil
                     self.tokenRequestTimeZone = nil
@@ -157,13 +195,17 @@ final class UsageStore: ObservableObject {
                     limits: value.limits, tokens: value.tokens ?? (sameAccount ? self.snapshot?.tokens : nil),
                     fetchedAt: value.fetchedAt,
                     tokenIssue: includeTokens ? value.tokenIssue : (sameAccount ? self.snapshot?.tokenIssue : nil),
-                    resetCredits: value.resetCredits, historyKey: value.historyKey
+                    resetCredits: value.resetCredits, historyKey: value.historyKey, syncAccountKey: value.syncAccountKey
                 )
-                self.history = histories.periods
-                self.limitHistory = histories.limits
+                self.localHistories = histories
+                if !sameAccount || !self.syncEnabled || self.syncDevices.isEmpty {
+                    self.history = histories.periods
+                    self.limitHistory = histories.limits
+                }
                 self.historyIssue = histories.storageIssue
                 self.errorMessage = nil
                 self.isLoading = false
+                if self.syncEnabled { self.enqueueSync(value, histories: histories) }
                 if !includeTokens { self.updateTokenCollection() }
             } catch {
                 guard let self, self.generation == requestGeneration, !Task.isCancelled else { return }
@@ -176,6 +218,14 @@ final class UsageStore: ObservableObject {
 
     func changeMode() {
         generation += 1
+        syncGeneration += 1
+        syncTask?.cancel()
+        pendingSync = nil
+        isSyncing = false
+        syncDevices = []
+        syncIssue = nil
+        localHistories = UsageHistories()
+        localEstimate = nil
         refreshTask?.cancel()
         estimateTask?.cancel()
         estimateTask = nil
@@ -196,6 +246,9 @@ final class UsageStore: ObservableObject {
     }
 
     func stop() {
+        syncGeneration += 1
+        syncTask?.cancel()
+        pendingSync = nil
         timerTask?.cancel()
         refreshTask?.cancel()
         estimateTask?.cancel()
@@ -230,9 +283,71 @@ final class UsageStore: ObservableObject {
             await estimateCacheResetTask?.value
             let result = try? await estimator.estimate(now: requestedAt)
             guard let self, self.generation == requestGeneration, !Task.isCancelled else { return }
+            self.localEstimate = result
             self.todayEstimate = result
             self.estimateTask = nil
         }
+    }
+
+    private func enqueueSync(_ snapshot: UsageSnapshot, histories: UsageHistories) {
+        pendingSync = (snapshot, histories)
+        guard syncTask == nil else { return }
+        let requestGeneration = syncGeneration
+        isSyncing = true
+        syncTask = Task(priority: .utility) { [weak self] in
+            guard let self else { return }
+            defer {
+                self.syncTask = nil
+                self.isSyncing = false
+                // Coalesce rapid refreshes, including a setting/account change during disk I/O.
+                if self.syncEnabled, !self.isDemo, let pending = self.pendingSync {
+                    self.enqueueSync(pending.0, histories: pending.1)
+                }
+            }
+            while !Task.isCancelled, self.syncGeneration == requestGeneration,
+                  let pending = self.pendingSync {
+                self.pendingSync = nil
+                let timestamp = self.now()
+                await self.estimateCacheResetTask?.value
+                // Collection is independent of card visibility. Previous-day tail is scanned too,
+                // so tokens written just before sleep/midnight are exported on the next launch.
+                let estimate = pending.0.syncAccountKey == nil ? nil
+                    : try? await self.estimator.estimate(now: timestamp, includePreviousDay: true)
+                guard !Task.isCancelled, self.syncGeneration == requestGeneration else { return }
+                self.localEstimate = estimate
+                do {
+                    let result = try await self.syncEngine.exchange(snapshot: pending.0, local: pending.1,
+                                                                   estimate: estimate, now: timestamp)
+                    guard !Task.isCancelled, self.syncGeneration == requestGeneration,
+                          pending.0.historyKey == self.snapshot?.historyKey else { return }
+                    self.limitHistory = result.limits
+                    self.history = result.periods
+                    self.todayEstimate = result.estimate
+                    self.syncDevices = result.devices
+                    self.syncIssue = result.issue
+                    self.syncFolder = result.folder
+                } catch is CancellationError { return }
+                catch {
+                    guard self.syncGeneration == requestGeneration else { return }
+                    self.syncIssue = "동기화를 완료하지 못했어요. 다음 갱신에서 다시 시도해요."
+                    self.todayEstimate = estimate
+                }
+            }
+        }
+    }
+
+    var syncStatus: String {
+        if isDemo { return "샘플 모드에서는 동기화하지 않아요" }
+        if !syncEnabled { return "이 Mac의 기록만 표시" }
+        if isSyncing { return "기기 기록 확인 중…" }
+        if let syncIssue { return syncIssue }
+        if syncDevices.isEmpty { return "첫 동기화를 기다리고 있어요" }
+        let stale = syncDevices.contains { !$0.isCurrentDevice && now().timeIntervalSince($0.lastSeen) > 1_800 }
+        return "\(syncDevices.count)대의 기록 통합 · " + (stale ? "다른 기기 기록 지연" : "iCloud Drive")
+    }
+
+    func openSyncFolder() {
+        if let syncFolder { NSWorkspace.shared.open(syncFolder) }
     }
 
     private func updateTokenCollection() {
@@ -254,6 +369,7 @@ final class UsageStore: ObservableObject {
         await refreshTask?.value
         await estimateTask?.value
         await estimateCacheResetTask?.value
+        await syncTask?.value
     }
 
     private func startTimer() {

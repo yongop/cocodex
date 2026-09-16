@@ -7,6 +7,8 @@ struct TokenCard: View {
     let issue: String?
     let now: Date
     let todayEstimate: TodayTokenEstimate?
+    var synchronized = false
+    private var estimateScope: String { synchronized ? "동기화된 기기의 Codex 기록" : "이 Mac의 로컬 Codex 기록" }
     @Binding var mode: UsageCardMode
     @State private var isHovered = false
 
@@ -70,7 +72,7 @@ struct TokenCard: View {
                 .lineLimit(1).minimumScaleFactor(0.9)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .help("오늘: 이 Mac의 로컬 Codex 기록 기반 추정 \(value?.formatted() ?? "미집계") 토큰. 어제 대비 = 오늘 추정 ÷ 어제 서버 집계 × 100. 두 집계의 범위·시간대가 다를 수 있어요.\(todayEstimate?.isPartial == true ? " 일부 기록을 읽지 못했거나 누적값 재설정이 감지됐어요." : "")")
+        .help("오늘: \(estimateScope) 기반 추정 \(value?.formatted() ?? "미집계") 토큰. 어제 대비 = 오늘 추정 ÷ 어제 서버 집계 × 100. 두 집계의 범위·시간대가 다를 수 있어요.\(todayEstimate?.isPartial == true ? " 일부 기록이 없거나 다른 기기의 최신 기록이 아직 도착하지 않았을 수 있어요." : "")")
     }
 
     private var activityChart: some View {

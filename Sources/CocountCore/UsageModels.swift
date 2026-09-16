@@ -74,15 +74,17 @@ public struct UsageSnapshot: Sendable {
     public let tokenIssue: String?
     public let resetCredits: ResetCredits?
     public let historyKey: String?
+    public let syncAccountKey: String?
 
     public init(limits: RateLimitBucket, tokens: TokenUsage?, fetchedAt: Date, tokenIssue: String? = nil,
-                resetCredits: ResetCredits? = nil, historyKey: String? = nil) {
+                resetCredits: ResetCredits? = nil, historyKey: String? = nil, syncAccountKey: String? = nil) {
         self.limits = limits
         self.tokens = tokens
         self.fetchedAt = fetchedAt
         self.tokenIssue = tokenIssue
         self.resetCredits = resetCredits
         self.historyKey = historyKey
+        self.syncAccountKey = syncAccountKey
     }
 
     public static func demo(now: Date = .now) -> UsageSnapshot {

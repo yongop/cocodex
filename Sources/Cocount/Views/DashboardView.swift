@@ -68,12 +68,19 @@ struct DashboardView: View {
                                            now: displayNow, mode: $store.usageCardMode)
                         } else {
                             TokenCard(usage: snapshot.tokens, issue: snapshot.tokenIssue, now: displayNow,
-                                      todayEstimate: store.todayEstimate, mode: $store.usageCardMode)
+                                      todayEstimate: store.todayEstimate, synchronized: store.syncEnabled && !store.isDemo, mode: $store.usageCardMode)
                         }
                     }
                     ResetCreditsView(summary: snapshot.resetCredits, now: displayNow, calendarFocus: $calendarFocus)
                 } else {
                     emptyState
+                }
+                if store.syncEnabled && !store.isDemo {
+                    Label(store.syncStatus, systemImage: "icloud")
+                        .font(.system(size: 10)).foregroundStyle(theme.muted)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 4)
                 }
                 if let error = store.errorMessage {
                     Label(error, systemImage: "exclamationmark.circle")

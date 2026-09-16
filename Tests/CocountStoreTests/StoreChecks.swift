@@ -22,7 +22,8 @@ private actor RecordingProvider: UsageProvider {
         let demo = UsageSnapshot.demo()
         return UsageSnapshot(limits: demo.limits, tokens: includeTokens && tokenIssue == nil ? demo.tokens : nil,
                              fetchedAt: .now, tokenIssue: includeTokens ? tokenIssue : nil,
-                             resetCredits: demo.resetCredits, historyKey: account)
+                             resetCredits: demo.resetCredits, historyKey: account,
+                             syncAccountKey: account.map { String(repeating: $0 == "test-account" ? "a" : "b", count: 64) })
     }
 }
 
@@ -39,15 +40,19 @@ private final class Fixture {
     let clock = TestClock()
     let defaults: UserDefaults
     let estimator: LocalTokenEstimator
+    let syncEngine: UsageSyncEngine
     let store: UsageStore
 
-    init(visible: Bool = true) throws {
+    init(visible: Bool = true, sync: Bool = false) throws {
         defaults = UserDefaults(suiteName: suite)!
+        defaults.set(sync, forKey: "iCloudSyncEnabled")
         estimator = LocalTokenEstimator(root: root)
+        syncEngine = UsageSyncEngine(localRoot: root.appendingPathComponent("outbox"),
+            cloudRoot: root.appendingPathComponent("cloud"), deviceID: String(repeating: "1", count: 64), deviceName: "Test Mac")
         let clock = clock
         store = UsageStore(provider: provider, defaults: defaults,
             historyPersistence: UsageHistoryPersistence(suiteName: suite, root: root.appendingPathComponent("history")),
-            estimator: estimator,
+            estimator: estimator, syncEngine: syncEngine,
             now: { clock.now })
         try FileManager.default.createDirectory(at: root.appendingPathComponent("sessions"),
                                                  withIntermediateDirectories: true)
@@ -447,6 +452,57 @@ struct StoreChecks {
         print("PASS menu updates only for changed display values, including errors, recovery, and demo mode")
     }
 
+    static func syncCollectsHiddenAndReusesCache() async throws {
+        let f = try Fixture(visible: false, sync: true)
+        f.store.showTokens = false
+        f.store.refresh()
+        try await settled(f.store)
+        try await waitUntil { !f.store.isSyncing && f.store.syncDevices.count == 1 }
+        precondition(f.store.todayEstimate?.tokens == 100 && f.store.syncIssue == nil)
+        await f.calls([false])
+        try f.appendEvent()
+        f.clock.now += 60
+        f.store.refresh()
+        try await settled(f.store)
+        try await waitUntil { !f.store.isSyncing && f.store.todayEstimate?.tokens == 150 }
+        let scan = await f.estimator.lastScan
+        precondition(scan.fullFiles == 0 && scan.appendedFiles == 1)
+        f.store.refresh()
+        try await settled(f.store)
+        try await waitUntil { !f.store.isSyncing }
+        let io = await f.syncEngine.lastMetrics
+        precondition(io.cloudWrites == 0 && io.filesRead == 0 && io.localWrites == 0)
+        f.store.syncEnabled = false
+        precondition(f.store.syncDevices.isEmpty && f.store.todayEstimate?.tokens == 150)
+        try f.appendEvent()
+        f.clock.now += 60
+        f.store.refresh()
+        try await settled(f.store)
+        precondition(!f.store.isSyncing && f.store.todayEstimate?.tokens == 150)
+        await f.close()
+        print("PASS sync collects while hidden, keeps incremental scans, skips unchanged I/O, and stops when disabled")
+    }
+
+    static func syncAccountAndDemoIsolation() async throws {
+        let f = try Fixture(visible: false, sync: true)
+        f.store.refresh()
+        try await settled(f.store)
+        try await waitUntil { !f.store.isSyncing && f.store.syncDevices.count == 1 }
+        await f.provider.configure(account: nil)
+        f.store.refresh()
+        try await settled(f.store)
+        try await waitUntil { !f.store.isSyncing }
+        precondition(f.store.syncDevices.isEmpty && f.store.syncIssue != nil)
+        f.store.isDemo = true
+        f.store.changeMode()
+        precondition(!f.store.isSyncing && f.store.syncDevices.isEmpty && f.store.syncIssue == nil)
+        f.store.syncEnabled = false
+        f.store.syncEnabled = true
+        precondition(!f.store.isSyncing)
+        await f.close()
+        print("PASS unidentified accounts and demo mode never publish synchronized records")
+    }
+
     static func main() async throws {
         try await initialAndInFlightSwitch()
         try await cachedSwitches()
@@ -463,6 +519,8 @@ struct StoreChecks {
         try await dashboardVisibility()
         try await visibilityDuringRequests()
         try await menuContentDeduplication()
-        print("15 store checks passed.")
+        try await syncCollectsHiddenAndReusesCache()
+        try await syncAccountAndDemoIsolation()
+        print("17 store checks passed.")
     }
 }

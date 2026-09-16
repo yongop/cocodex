@@ -5,6 +5,7 @@ public struct UsageHistories: Sendable {
     public var periods = PeriodHistory()
     public var limits = LimitUsageHistory()
     public var storageIssue: String?
+    public init() {}
 }
 
 /// One active JSON per account plus immutable, checksummed day files. Only JSON is rewritten

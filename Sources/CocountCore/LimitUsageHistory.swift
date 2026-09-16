@@ -8,7 +8,7 @@ public struct LimitUsageHistory: Codable, Sendable {
         public let reset: Date
     }
 
-    public struct Observation: Codable, Sendable {
+    public struct Observation: Codable, Equatable, Sendable {
         public let date: Date
         public let windows: [Window]
     }
@@ -28,6 +28,8 @@ public struct LimitUsageHistory: Codable, Sendable {
     public private(set) var observations: [Observation] = []
     public private(set) var closedDays: [LimitUsageDay] = []
     public private(set) var archivedThrough: Date?
+    // Presentation-only overlay. Never persisted into a device's local source history.
+    var mergedArchives: [LimitUsageDay]?
 
     // Closed payloads live in separate files, never in the frequently rewritten active JSON.
     private enum CodingKeys: String, CodingKey { case observations, archivedThrough }
@@ -155,6 +157,7 @@ public struct LimitUsageHistory: Codable, Sendable {
     }
 
     func bins(_ intervals: [DateInterval], minutes: Int) -> [Bin] {
+        if let mergedArchives { return mergedBins(intervals, minutes: minutes, archives: mergedArchives) }
         var result = intervals.map { Bin(start: $0.start, end: $0.end) }
         guard let first = intervals.first, let last = intervals.last else { return result }
         // Archive bins keep both zero usage and missing coverage distinct. Absolute timestamps
@@ -201,6 +204,39 @@ public struct LimitUsageHistory: Codable, Sendable {
                 result[index].usedPercent = (result[index].usedPercent ?? 0) + decrease * overlap / duration
                 result[index].observedSeconds += overlap
             }
+        }
+        return result
+    }
+
+    /// Merge account observations before computing deltas. A stale higher balance from a
+    /// second device cannot count the same decrease twice within one reset period.
+    static func merging(local: LimitUsageHistory, observations incoming: [Observation],
+                        archives: [LimitUsageDay], now: Date) -> LimitUsageHistory {
+        var result = LimitUsageHistory()
+        result.mergedArchives = local.closedDays + archives
+        var byDate: [Date: [Int: Window]] = [:]
+        for observation in local.observations + incoming where observation.date <= now {
+            for window in observation.windows {
+                let previous = byDate[observation.date]?[window.minutes]
+                if previous == nil || window.reset > previous!.reset
+                    || (window.reset == previous!.reset && window.remaining < previous!.remaining) {
+                    byDate[observation.date, default: [:]][window.minutes] = window
+                }
+            }
+            if byDate[observation.date] == nil { byDate[observation.date] = [:] }
+        }
+        var floors: [Int: Window] = [:]
+        for date in byDate.keys.sorted() {
+            let windows = byDate[date]!.values.sorted { $0.minutes < $1.minutes }.compactMap { window -> Window? in
+                if let previous = floors[window.minutes] {
+                    if window.reset == previous.reset && window.remaining > previous.remaining {
+                        return Window(minutes: window.minutes, remaining: previous.remaining, reset: window.reset)
+                    }
+                }
+                floors[window.minutes] = window
+                return window
+            }
+            result.observations.append(Observation(date: date, windows: windows))
         }
         return result
     }

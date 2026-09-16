@@ -64,7 +64,7 @@ extension LimitUsageHistory {
     /// Prefer a real midnight value (or bounded interpolation across midnight).
     /// When midnight was not observed, return the first known value with its true timestamp.
     func remainingBaseline(in interval: DateInterval, minutes: Int) -> LimitDepletionTrend.Baseline? {
-        var candidates = closedDays.compactMap { day -> LimitDepletionTrend.Baseline? in
+        var candidates = (mergedArchives ?? closedDays).compactMap { day -> LimitDepletionTrend.Baseline? in
             guard let baseline = day.windows.first(where: { $0.minutes == minutes })?.baseline,
                   baseline.date >= interval.start, baseline.date <= interval.end else { return nil }
             return baseline
@@ -85,6 +85,6 @@ extension LimitUsageHistory {
         }), let window = first.windows.first(where: { $0.minutes == minutes }) {
             candidates.append(.init(date: first.date, remaining: window.remaining))
         }
-        return candidates.min { $0.date < $1.date }
+        return candidates.min { $0.date == $1.date ? $0.remaining < $1.remaining : $0.date < $1.date }
     }
 }

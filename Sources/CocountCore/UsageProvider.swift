@@ -80,7 +80,10 @@ public struct AppServerUsageProvider: UsageProvider {
                 return SHA256.hash(data: Data(identity.utf8)).map { String(format: "%02x", $0) }.joined()
             }
             return UsageSnapshot(limits: limits, tokens: tokens, fetchedAt: .now, tokenIssue: tokenIssue,
-                                 resetCredits: response.rateLimitResetCredits, historyKey: historyKey)
+                                 resetCredits: response.rateLimitResetCredits, historyKey: historyKey,
+                                 syncAccountKey: account.email.map {
+                                     usageSyncDigest("cocount-sync-v1|\($0.lowercased())|\(limits.planType ?? "")")
+                                 })
         }
         return try await withTaskCancellationHandler {
             try await work.value

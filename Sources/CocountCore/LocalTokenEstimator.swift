@@ -6,9 +6,11 @@ public struct TodayTokenEstimate: Sendable {
     public let tokens: Int64?
     public let date: Date
     public let isPartial: Bool
-    public let tenMinuteTokens: [Int64]? 
+    public let tenMinuteTokens: [Int64]?
+    public let events: [TokenUsageEvent]
 
-    public init(tokens: Int64?, date: Date, isPartial: Bool = false, tenMinuteTokens: [Int64]? = nil) {
+    public init(tokens: Int64?, date: Date, isPartial: Bool = false, tenMinuteTokens: [Int64]? = nil, events: [TokenUsageEvent] = []) {
+        self.events = events
         self.tokens = tokens
         self.date = date
         self.isPartial = isPartial
@@ -59,11 +61,12 @@ public actor LocalTokenEstimator {
             ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex").path)
     }
 
-    public func estimate(now: Date = .now) throws -> TodayTokenEstimate {
+    public func estimate(now: Date = .now, includePreviousDay: Bool = false) throws -> TodayTokenEstimate {
         try Task.checkCancellation()
         let calendar = Calendar.current
-        let start = calendar.startOfDay(for: now)
-        let end = calendar.date(byAdding: .day, value: 1, to: start)!
+        let today = calendar.startOfDay(for: now)
+        let start = includePreviousDay ? calendar.date(byAdding: .day, value: -1, to: today)! : today
+        let end = calendar.date(byAdding: .day, value: 1, to: today)!
         lastScan = ScanMetrics()
         if cachedDay != start || cachedTimeZone != calendar.timeZone {
             cache.removeAll(); cachedDay = start; cachedTimeZone = calendar.timeZone
@@ -123,7 +126,11 @@ public actor LocalTokenEstimator {
         cache = cache.filter { seen.contains($0.key) }
         var total: Int64 = 0
         var tenMinuteBins = Array(repeating: Int64(0), count: 144)
+        let events = samples.compactMap { key, amount in
+            dates[key].map { TokenUsageEvent(id: key.base64EncodedString(), date: $0, tokens: amount) }
+        }.sorted { $0.id < $1.id }
         for (key, amount) in samples {
+            guard let date = dates[key], date >= today else { continue }
             let sum = total.addingReportingOverflow(amount)
             guard !sum.overflow else { return TodayTokenEstimate(tokens: nil, date: now, isPartial: true) }
             total = sum.partialValue
@@ -133,7 +140,8 @@ public actor LocalTokenEstimator {
         }
         return TodayTokenEstimate(tokens: !readableRoot || (samples.isEmpty && failures > 0) ? nil : total,
                                   date: now, isPartial: partial || failures > 0,
-                                  tenMinuteTokens: !readableRoot || (samples.isEmpty && failures > 0) ? nil : tenMinuteBins)
+                                  tenMinuteTokens: !readableRoot || (samples.isEmpty && failures > 0) ? nil : tenMinuteBins,
+                                  events: events)
     }
 
     private struct CachedFile {
