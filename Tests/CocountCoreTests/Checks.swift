@@ -32,7 +32,13 @@ struct Checks {
         let local = LocalTokenTests()
         let limits = LimitUsageHistoryTests()
         let daily = DailyHistoryTests()
+        let depletion = LimitDepletionTrendTests()
         let checks: [(String, () throws -> Void)] = [
+            ("weekly depletion scale and missing coverage", depletion.weeklyCumulativeScaleAndMissingCoverage),
+            ("depletion midnight baseline and current-time endpoint", depletion.midnightBaselineAndCurrentTime),
+            ("depletion absent midnight, resets and zero floor", depletion.absentMidnightResetsAndFloor),
+            ("depletion archive restoration and legacy compatibility", depletion.archivedBaselineAndLegacyCompatibility),
+            ("depletion DST and zero baseline", depletion.daylightSavingEndAndZeroBaseline),
             ("daily rollup preserves midnight, zero, missing coverage and codec", daily.midnightZeroMissingResetAndCodec),
             ("daily rollup DST, time-zone changes and retention", daily.dstTimeZoneAndRetention),
             ("daily rollup matches both windows across resets and gaps", daily.mixedWindowsMatchOriginalQueries),

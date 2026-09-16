@@ -15,17 +15,20 @@ public struct LimitUsageDay: Codable, Sendable, Equatable {
         public let minutes: Int
         public let used: [Double]
         public let observed: [Double]
-        enum CodingKeys: String, CodingKey { case minutes, samples }
+        public let baseline: LimitDepletionTrend.Baseline?
+        enum CodingKeys: String, CodingKey { case minutes, samples, baseline }
 
-        init(minutes: Int, bins: [LimitUsageHistory.Bin]) {
+        init(minutes: Int, bins: [LimitUsageHistory.Bin], baseline: LimitDepletionTrend.Baseline?) {
             self.minutes = minutes
             used = bins.map { $0.usedPercent ?? 0 }
             observed = bins.map(\.observedSeconds)
+            self.baseline = baseline
         }
 
         public func encode(to encoder: any Encoder) throws {
             var container = encoder.container(keyedBy: CodingKeys.self)
             try container.encode(minutes, forKey: .minutes)
+            try container.encodeIfPresent(baseline, forKey: .baseline)
             var bytes = Data()
             bytes.reserveCapacity(used.count * 16)
             for index in used.indices {
@@ -40,6 +43,9 @@ public struct LimitUsageDay: Codable, Sendable, Equatable {
         public init(from decoder: any Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             minutes = try container.decode(Int.self, forKey: .minutes)
+            baseline = try container.decodeIfPresent(LimitDepletionTrend.Baseline.self, forKey: .baseline)
+            guard baseline.map({ $0.date.timeIntervalSince1970.isFinite && $0.remaining.isFinite
+                && (0...100).contains($0.remaining) }) ?? true else { throw HistoryStorageError.invalidArchive }
             let bytes = try container.decode(Data.self, forKey: .samples)
             guard minutes > 0, !bytes.isEmpty, bytes.count % 16 == 0, bytes.count <= 104 * 16 else {
                 throw HistoryStorageError.invalidArchive
@@ -73,7 +79,7 @@ public struct LimitUsageDay: Codable, Sendable, Equatable {
         windows = minutes.sorted().compactMap { minutes in
             let bins = history.bins(intervals, minutes: minutes)
             guard bins.contains(where: { $0.observedSeconds > 0 }) else { return nil }
-            return Window(minutes: minutes, bins: bins)
+            return Window(minutes: minutes, bins: bins, baseline: history.remainingBaseline(in: interval, minutes: minutes))
         }
     }
 
@@ -98,7 +104,7 @@ public struct LimitUsageDay: Codable, Sendable, Equatable {
                   window.used.count == Int(ceil(duration / 900)) && window.observed.indices.allSatisfy {
                       window.observed[$0] <= min(900, duration - Double($0) * 900) + 0.000_001
                           && (window.observed[$0] > 0 || window.used[$0] == 0)
-                  }
+                  } && (window.baseline.map { $0.date >= value.start && $0.date < value.end } ?? true)
               }) else {
             throw HistoryStorageError.invalidArchive
         }

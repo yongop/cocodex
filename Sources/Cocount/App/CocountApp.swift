@@ -208,6 +208,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         let content = DashboardView(store: preview, constrainHeight: false)
             .environment(\.cocountAnimationsEnabled, false)
+            .environment(\.cocountLimitTrendPreview, arguments.contains("--trend"))
             .environment(\.colorScheme, arguments.contains("--dark") ? .dark : .light)
         let renderer = ImageRenderer(content: content)
         renderer.scale = 2
