@@ -1,5 +1,6 @@
 import Foundation
 import CocountCore
+import Combine
 
 private actor RecordingProvider: UsageProvider {
     private(set) var calls: [Bool] = []
@@ -40,7 +41,7 @@ private final class Fixture {
     let estimator: LocalTokenEstimator
     let store: UsageStore
 
-    init() throws {
+    init(visible: Bool = true) throws {
         defaults = UserDefaults(suiteName: suite)!
         estimator = LocalTokenEstimator(root: root)
         let clock = clock
@@ -51,6 +52,7 @@ private final class Fixture {
         try FileManager.default.createDirectory(at: root.appendingPathComponent("sessions"),
                                                  withIntermediateDirectories: true)
         try event(total: 100, last: 100).write(to: log, atomically: true, encoding: .utf8)
+        store.setDashboardVisible(visible)
     }
 
     var log: URL { root.appendingPathComponent("sessions/usage.jsonl") }
@@ -352,6 +354,99 @@ struct StoreChecks {
         print("PASS unchanged settings do not reload; demo changes invalidate caches and ignore canceled work")
     }
 
+    static func dashboardVisibility() async throws {
+        let f = try Fixture(visible: false)
+        f.store.usageCardMode = .tokens
+        precondition(!f.store.isLoading)
+        f.store.refresh()
+        try await settled(f.store)
+        await f.calls([false])
+        precondition(f.store.todayEstimate == nil)
+        let hiddenScan = await f.estimator.lastScan
+        precondition(hiddenScan.bytesRead == 0)
+
+        f.store.setDashboardVisible(true)
+        f.store.refreshIfNeeded()
+        try await settled(f.store)
+        try await waitUntil { f.store.todayEstimate != nil }
+        await f.calls([false, true])
+        precondition(f.store.todayEstimate?.tokens == 100)
+
+        f.store.setDashboardVisible(false)
+        f.clock.now += 300
+        try f.appendEvent()
+        f.store.refresh()
+        try await settled(f.store)
+        await f.calls([false, true, false])
+        precondition(f.store.todayEstimate?.tokens == 100 && f.store.snapshot?.tokens != nil)
+        f.store.setDashboardVisible(true)
+        try await settled(f.store)
+        try await waitUntil { f.store.todayEstimate?.tokens == 150 }
+        await f.calls([false, true, false, true])
+        let resumedScan = await f.estimator.lastScan
+        precondition(resumedScan.appendedFiles == 1 && resumedScan.fullFiles == 0)
+        for _ in 0..<10 {
+            f.store.setDashboardVisible(false)
+            f.store.setDashboardVisible(true)
+        }
+        precondition(!f.store.isLoading)
+        await f.calls([false, true, false, true])
+        await f.close()
+        print("PASS closed dashboards collect only quotas; reopening resumes stale tokens once with the retained log cache")
+    }
+
+    static func visibilityDuringRequests() async throws {
+        let f = try Fixture(visible: false)
+        f.store.usageCardMode = .tokens
+        f.store.refresh()
+        f.store.setDashboardVisible(true)
+        try await settled(f.store)
+        try await waitUntil { f.store.todayEstimate != nil }
+        await f.calls([false, true])
+        f.clock.now += 300
+        try f.appendEvent()
+        f.store.refresh()
+        f.store.setDashboardVisible(false)
+        try await settled(f.store)
+        try await waitUntil { f.store.todayEstimate?.tokens == 150 }
+        f.store.setDashboardVisible(true)
+        precondition(!f.store.isLoading)
+        await f.calls([false, true, true])
+        await f.close()
+        print("PASS opening during a quota request adds one token follow-up; closing retains in-flight results")
+    }
+
+    static func menuContentDeduplication() async throws {
+        let f = try Fixture()
+        var values: [MenuBarContent] = []
+        let subscription = f.store.menuContent.sink { values.append($0) }
+        precondition(values.count == 1)
+        f.store.refresh()
+        try await settled(f.store)
+        precondition(values.count == 2)
+        f.store.showSettings.toggle()
+        f.store.themePreset = .sage
+        f.store.refresh()
+        try await settled(f.store)
+        precondition(values.count == 2, "Same quota and unrelated state must not redraw the menu item")
+        await f.provider.configure(failure: .timeout)
+        f.store.refresh()
+        try await settled(f.store)
+        precondition(values.count == 3 && values.last!.title.hasPrefix("! "))
+        f.store.refresh()
+        try await settled(f.store)
+        precondition(values.count == 3)
+        await f.provider.configure()
+        f.store.refresh()
+        try await settled(f.store)
+        precondition(values.count == 4 && !values.last!.title.hasPrefix("! "))
+        f.store.isDemo = true
+        precondition(values.count == 5 && values.last!.isDemo && values.last!.title.hasPrefix("예시 "))
+        subscription.cancel()
+        await f.close()
+        print("PASS menu updates only for changed display values, including errors, recovery, and demo mode")
+    }
+
     static func main() async throws {
         try await initialAndInFlightSwitch()
         try await cachedSwitches()
@@ -365,6 +460,9 @@ struct StoreChecks {
         try await unavailableTokensAreNotRetriedOnEverySwitch()
         try await calendarAndIntervalChanges()
         try await demoAndSameValueChanges()
-        print("12 store checks passed.")
+        try await dashboardVisibility()
+        try await visibilityDuringRequests()
+        try await menuContentDeduplication()
+        print("15 store checks passed.")
     }
 }

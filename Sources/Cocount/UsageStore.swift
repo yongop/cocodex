@@ -8,6 +8,17 @@ enum UsageCardMode: String, CaseIterable {
     var title: String { self == .limits ? "한도 사용" : "토큰 사용" }
 }
 
+struct MenuBarContent: Equatable {
+    let title: String
+    let isDemo: Bool
+
+    init(snapshot: UsageSnapshot?, errorMessage: String?, isDemo: Bool) {
+        let remaining = UsageFormatting.percent(snapshot?.limits.featuredWindow?.remainingPercent)
+        title = isDemo ? "예시 \(remaining)" : "\(errorMessage == nil ? "" : "! ")\(remaining)"
+        self.isDemo = isDemo
+    }
+}
+
 @MainActor
 final class UsageStore: ObservableObject {
     @Published private(set) var snapshot: UsageSnapshot?
@@ -55,6 +66,7 @@ final class UsageStore: ObservableObject {
     private var estimateCacheResetTask: Task<Void, Never>?
     private let estimator: LocalTokenEstimator
     private var generation = 0
+    private(set) var isDashboardVisible = false
     // Quota-only refreshes must not extend the freshness of the token data.
     private var lastTokenRequestAt: Date?
     private var tokenRequestTimeZone: TimeZone?
@@ -87,9 +99,17 @@ final class UsageStore: ObservableObject {
         }
     }
 
-    var menuTitle: String {
-        let value = UsageFormatting.percent(snapshot?.limits.featuredWindow?.remainingPercent)
-        return isDemo ? "예시 \(value)" : "\(errorMessage == nil ? "" : "! ")\(value)"
+    var menuContent: AnyPublisher<MenuBarContent, Never> {
+        Publishers.CombineLatest3($snapshot, $errorMessage, $isDemo)
+            .map { MenuBarContent(snapshot: $0, errorMessage: $1, isDemo: $2) }
+            .removeDuplicates()
+            .eraseToAnyPublisher()
+    }
+
+    func setDashboardVisible(_ visible: Bool) {
+        guard visible != isDashboardVisible else { return }
+        isDashboardVisible = visible
+        if visible { updateTokenCollection() }
     }
 
     func start() {
@@ -102,6 +122,7 @@ final class UsageStore: ObservableObject {
             refresh()
             return
         }
+        updateTokenCollection()
     }
 
     func refresh() {
@@ -112,7 +133,7 @@ final class UsageStore: ObservableObject {
         }
         isLoading = true
         let requestGeneration = generation
-        let includeTokens = showTokens && usageCardMode == .tokens
+        let includeTokens = isDashboardVisible && showTokens && usageCardMode == .tokens
         if includeTokens {
             // Also throttle failed attempts so switching cards cannot cause a retry loop.
             lastTokenRequestAt = now()
@@ -215,7 +236,7 @@ final class UsageStore: ObservableObject {
     }
 
     private func updateTokenCollection() {
-        guard !isDemo, showTokens, usageCardMode == .tokens, needsTokenRefresh else { return }
+        guard !isDemo, isDashboardVisible, showTokens, usageCardMode == .tokens, needsTokenRefresh else { return }
         refresh()
     }
 

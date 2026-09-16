@@ -46,7 +46,7 @@ struct TokenCard: View {
                     .frame(width: Theme.metricWidth)
                     activityChart
                 }
-                DailyTokenChart(estimate: todayEstimate)
+                DailyTokenChart(estimate: todayEstimate, now: now)
             }
         }
         .contentShape(RoundedRectangle(cornerRadius: Theme.radius))

@@ -25,6 +25,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
     private var subscription: AnyCancellable?
     private var wakeObserver: NSObjectProtocol?
+    private var visibilityObserver: NSObjectProtocol?
+    private let displayClock = DashboardClock()
     private var probeTask: Task<Void, Never>?
     private var isTerminating = false
     private var canTerminate = false
@@ -93,15 +95,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = NSHostingController(rootView: liveView)
         controller.sizingOptions = [.preferredContentSize]
         popover = MenuBarPopover(contentViewController: controller)
-        subscription = store.objectWillChange.sink { [weak self] in
-            Task { @MainActor in self?.updateStatus() }
+        subscription = store.menuContent.sink { [weak self] content in
+            self?.updateStatus(content)
+        }
+        visibilityObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeOcclusionStateNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.updatePresentationVisibility() }
         }
         wakeObserver = NSWorkspace.shared.notificationCenter.addObserver(
             forName: NSWorkspace.didWakeNotification, object: nil, queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in self?.store.refreshIfNeeded() }
+            Task { @MainActor in
+                self?.displayClock.refresh()
+                self?.store.refreshIfNeeded()
+            }
         }
-        updateStatus()
         store.start()
 
         if arguments.contains("--window") { showDevelopmentWindow() }
@@ -117,6 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.stop()
         probeTask?.cancel()
         if let wakeObserver { NSWorkspace.shared.notificationCenter.removeObserver(wakeObserver) }
+        if let visibilityObserver { NotificationCenter.default.removeObserver(visibilityObserver) }
+        displayClock.setVisible(false)
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
@@ -134,10 +145,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var liveView: some View {
-        TimelineView(.periodic(from: .now, by: 60)) { context in
-            DashboardView(store: self.store, now: context.date)
-        }
-        .fixedSize()
+        LiveDashboardView(store: store, clock: displayClock).fixedSize()
     }
 
     @objc private func togglePopover() {
@@ -146,13 +154,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             popover.close()
         } else {
             popover.show(relativeTo: button)
-            store.refreshIfNeeded()
         }
+        updatePresentationVisibility()
     }
 
-    private func updateStatus() {
+    private func updatePresentationVisibility() {
+        let visible = popover?.isVisible == true || window?.occlusionState.contains(.visible) == true
+        displayClock.setVisible(visible)
+        let wasVisible = store.isDashboardVisible
+        store.setDashboardVisible(visible)
+        if visible && !wasVisible { store.refreshIfNeeded() }
+    }
+
+    private func updateStatus(_ content: MenuBarContent) {
         let title = NSMutableAttributedString(
-            string: store.menuTitle,
+            string: content.title,
             attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 13, weight: .semibold)]
         )
         let percentRange = (title.string as NSString).range(of: "%")
@@ -160,8 +176,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             title.addAttributes([.font: NSFont.systemFont(ofSize: 11, weight: .medium)], range: percentRange)
         }
         statusItem?.button?.attributedTitle = title
-        statusItem?.button?.setAccessibilityLabel("Co-Count · \(store.menuTitle)")
-        statusItem?.button?.toolTip = "Co-Count · \(store.isDemo ? "샘플 데이터" : "Codex 남은 한도")"
+        statusItem?.button?.setAccessibilityLabel("Co-Count · \(content.title)")
+        statusItem?.button?.toolTip = "Co-Count · \(content.isDemo ? "샘플 데이터" : "Codex 남은 한도")"
     }
 
     private func showDevelopmentWindow() {
@@ -174,6 +190,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         window.center()
         window.makeKeyAndOrderFront(nil)
         self.window = window
+        updatePresentationVisibility()
         NSApp.activate(ignoringOtherApps: true)
     }
 

@@ -7,6 +7,9 @@ final class MenuBarPopover: NSObject, NSPopoverDelegate {
     private let popover = NSPopover()
     private var transitionID = 0
     private(set) var isPresented = false
+    var isVisible: Bool {
+        isPresented && popover.contentViewController?.view.window?.occlusionState.contains(.visible) == true
+    }
 
     init(contentViewController: NSViewController) {
         super.init()

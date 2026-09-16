@@ -6,57 +6,55 @@ import SwiftUI
 struct DailyTokenChart: View {
     @Environment(\.cocountTheme) private var theme
     let estimate: TodayTokenEstimate?
+    let now: Date
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
-            let now = context.date
-            let values = estimate?.tenMinuteBins(on: now)
-            let maximum = Double(max(1, values?.max() ?? 0))
-            let nextInterval = TodayTokenEstimate.tenMinuteIndex(at: now) + 1
-            VStack(alignment: .leading, spacing: 2) {
-                GeometryReader { geometry in
-                    let nextBarStart = min(geometry.size.width,
-                                           (geometry.size.width + 1) * Double(nextInterval) / 144)
-                    ZStack(alignment: .bottomLeading) {
-                        Rectangle().fill(theme.border).frame(height: 1)
-                            .overlay(alignment: .topLeading) {
-                                ForEach(0..<5) { index in
-                                    Rectangle().fill(theme.muted.opacity(0.5))
-                                        .frame(width: 1, height: 4)
-                                        .offset(x: (geometry.size.width - 1) * Double(index) / 4, y: 1)
-                                }
-                            }
-                        HStack(alignment: .bottom, spacing: 1) {
-                            ForEach(0..<144, id: \.self) { index in
-                                let amount = values?[index] ?? 0
-                                Rectangle()
-                                    .fill(theme.accent.opacity(0.45))
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: amount > 0 ? max(2, Double(amount) / maximum * 25.2) : 0)
-                                    .frame(height: 28, alignment: .bottom)
-                                    .contentShape(Rectangle())
-                                    .help("\(timeLabel(index))–\(timeLabel(index + 1)): \(values == nil ? "미집계" : amount.formatted() + " 토큰 (추정)")")
+        let values = estimate?.tenMinuteBins(on: now)
+        let maximum = Double(max(1, values?.max() ?? 0))
+        let nextInterval = TodayTokenEstimate.tenMinuteIndex(at: now) + 1
+        VStack(alignment: .leading, spacing: 2) {
+            GeometryReader { geometry in
+                let nextBarStart = min(geometry.size.width,
+                                       (geometry.size.width + 1) * Double(nextInterval) / 144)
+                ZStack(alignment: .bottomLeading) {
+                    Rectangle().fill(theme.border).frame(height: 1)
+                        .overlay(alignment: .topLeading) {
+                            ForEach(0..<5) { index in
+                                Rectangle().fill(theme.muted.opacity(0.5))
+                                    .frame(width: 1, height: 4)
+                                    .offset(x: (geometry.size.width - 1) * Double(index) / 4, y: 1)
                             }
                         }
-                        // Align the dot's left edge with the next bar, including the 1pt bar spacing.
-                        NextIntervalDot()
-                            .offset(x: nextBarStart, y: 2.5)
-                            .allowsHitTesting(false)
+                    HStack(alignment: .bottom, spacing: 1) {
+                        ForEach(0..<144, id: \.self) { index in
+                            let amount = values?[index] ?? 0
+                            Rectangle()
+                                .fill(theme.accent.opacity(0.45))
+                                .frame(maxWidth: .infinity)
+                                .frame(height: amount > 0 ? max(2, Double(amount) / maximum * 25.2) : 0)
+                                .frame(height: 28, alignment: .bottom)
+                                .contentShape(Rectangle())
+                                .help("\(timeLabel(index))–\(timeLabel(index + 1)): \(values == nil ? "미집계" : amount.formatted() + " 토큰 (추정)")")
+                        }
                     }
+                    // Align the dot's left edge with the next bar, including the 1pt bar spacing.
+                    NextIntervalDot()
+                        .offset(x: nextBarStart, y: 2.5)
+                        .allowsHitTesting(false)
                 }
-                .frame(height: 30.1)
-                .padding(.bottom, 4)
-                HStack {
-                    Text("00")
-                    Spacer()
-                    Text("24")
-                }
-                .font(.system(size: 8)).monospacedDigit()
-                .foregroundStyle(theme.muted)
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("오늘 00시부터 24시까지 10분별 토큰 사용 추정. 다음 기록 구간 \(timeLabel(nextInterval)). \(values == nil ? "미집계" : "총 " + (values?.reduce(0, +).formatted() ?? "0") + " 토큰")")
+            .frame(height: 30.1)
+            .padding(.bottom, 4)
+            HStack {
+                Text("00")
+                Spacer()
+                Text("24")
+            }
+            .font(.system(size: 8)).monospacedDigit()
+            .foregroundStyle(theme.muted)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("오늘 00시부터 24시까지 10분별 토큰 사용 추정. 다음 기록 구간 \(timeLabel(nextInterval)). \(values == nil ? "미집계" : "총 " + (values?.reduce(0, +).formatted() ?? "0") + " 토큰")")
     }
 
     private func timeLabel(_ interval: Int) -> String {
